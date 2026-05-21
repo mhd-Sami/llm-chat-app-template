@@ -6,22 +6,37 @@ const typingIndicator = document.getElementById("typing-indicator");
 let chatHistory = [];
 let isProcessing = false;
 
-// LOAD HISTORY ON START
+/**
+ * Load chat history from backend
+ */
 async function loadHistory() {
-	const res = await fetch("/api/history");
-	const history = await res.json();
+	try {
+		const res = await fetch("/api/history");
 
-	chatMessages.innerHTML = "";
-	chatHistory = history;
+		if (!res.ok) {
+			console.warn("No history endpoint or failed to load history");
+			return;
+		}
 
-	for (let msg of history) {
-		addMessageToChat(msg.role, msg.content);
+		const history = await res.json();
+
+		chatMessages.innerHTML = "";
+		chatHistory = history;
+
+		for (let msg of history) {
+			addMessageToChat(msg.role, msg.content);
+		}
+	} catch (err) {
+		console.error("History load error:", err);
 	}
 }
 
 loadHistory();
 
-userInput.addEventListener("keydown", e => {
+/**
+ * Enter key send
+ */
+userInput.addEventListener("keydown", (e) => {
 	if (e.key === "Enter" && !e.shiftKey) {
 		e.preventDefault();
 		sendMessage();
@@ -30,49 +45,94 @@ userInput.addEventListener("keydown", e => {
 
 sendButton.addEventListener("click", sendMessage);
 
+/**
+ * Send message to backend
+ */
 async function sendMessage() {
 	const message = userInput.value.trim();
 	if (!message || isProcessing) return;
 
 	isProcessing = true;
 
+	// show user message
 	addMessageToChat("user", message);
 	chatHistory.push({ role: "user", content: message });
 
 	userInput.value = "";
 	typingIndicator.classList.add("visible");
 
+	// assistant placeholder
 	const assistantEl = document.createElement("div");
 	assistantEl.className = "message assistant-message";
-	assistantEl.innerHTML = "<p></p>";
-	const p = assistantEl.querySelector("p");
+	const p = document.createElement("p");
+	assistantEl.appendChild(p);
 	chatMessages.appendChild(assistantEl);
 
-	const res = await fetch("/api/chat", {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ messages: chatHistory }),
-	});
+	try {
+		const res = await fetch("/api/chat", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ messages: chatHistory }),
+		});
 
-	const reader = res.body.getReader();
-	const decoder = new TextDecoder();
+		if (!res.body) throw new Error("No stream received");
 
-	let full = "";
+		const reader = res.body.getReader();
+		const decoder = new TextDecoder();
 
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
+		let buffer = "";
+		let fullResponse = "";
 
-		full += decoder.decode(value);
-		p.textContent = full;
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+
+			buffer += decoder.decode(value, { stream: true });
+
+			// Split SSE blocks
+			const parts = buffer.split("\n\n");
+			buffer = parts.pop();
+
+			for (let part of parts) {
+				const lines = part.split("\n");
+
+				for (let line of lines) {
+					if (!line.startsWith("data:")) continue;
+
+					let jsonStr = line.replace("data:", "").trim();
+
+					if (jsonStr === "[DONE]") continue;
+
+					try {
+						const json = JSON.parse(jsonStr);
+
+						// Cloudflare AI response format
+						if (json.response) {
+							fullResponse += json.response;
+							p.textContent = fullResponse;
+							chatMessages.scrollTop = chatMessages.scrollHeight;
+						}
+					} catch (err) {
+						console.error("Parse error:", jsonStr);
+					}
+				}
+			}
+		}
+
+		// save assistant message
+		chatHistory.push({ role: "assistant", content: fullResponse });
+	} catch (err) {
+		console.error(err);
+		p.textContent = "Error: Failed to get response";
+	} finally {
+		typingIndicator.classList.remove("visible");
+		isProcessing = false;
 	}
-
-	chatHistory.push({ role: "assistant", content: full });
-
-	typingIndicator.classList.remove("visible");
-	isProcessing = false;
 }
 
+/**
+ * Add message to UI
+ */
 function addMessageToChat(role, content) {
 	const div = document.createElement("div");
 	div.className = `message ${role}-message`;
