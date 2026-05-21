@@ -1,22 +1,34 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "llm-chat-app-template",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public"
 	},
-	"observability": {
-		"enabled": true
-	},
+
 	"ai": {
 		"binding": "AI"
 	},
+
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "student-db",
+			"database_id": "72588300-19f9-466f-a7b4-277cde66dc9e"
+		}
+	],
+
+	"observability": {
+		"enabled": true
+	},
+
 	"upload_source_maps": true
 }
