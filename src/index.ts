@@ -33,65 +33,52 @@ export default {
 };
 
 async function handleChat(request: Request, env: Env): Promise<Response> {
-	const { messages } = await request.json();
+	try {
+		const { messages } = await request.json();
 
-	if (!messages.some(m => m.role === "system")) {
-		messages.unshift({ role: "system", content: SYSTEM_PROMPT });
-	}
+		if (!messages.some(m => m.role === "system")) {
+			messages.unshift({
+				role: "system",
+				content: SYSTEM_PROMPT,
+			});
+		}
 
-	const lastUserMessage =
-		[...messages].reverse().find(m => m.role === "user")?.content;
+		// Save user message
+		const lastUser = [...messages]
+			.reverse()
+			.find(m => m.role === "user")?.content;
 
-	// Save user message
-	if (lastUserMessage) {
-		await env.DB.prepare(
-			"INSERT INTO chat_history (role, content) VALUES (?, ?)"
-		)
-			.bind("user", lastUserMessage)
-			.run();
-	}
+		if (lastUser) {
+			await env.DB.prepare(
+				"INSERT INTO chat_history (role, content) VALUES (?, ?)"
+			)
+				.bind("user", lastUser)
+				.run();
+		}
 
-	const aiStream = await env.AI.run(
-		MODEL_ID,
-		{
+		// ✅ Correct Cloudflare AI streaming
+		const response = await env.AI.run(MODEL_ID, {
 			messages,
 			stream: true,
 			max_tokens: 1024,
-		}
-	);
+		});
 
-	const reader = aiStream.getReader();
-	const decoder = new TextDecoder();
+		return new Response(response, {
+			headers: {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				connection: "keep-alive",
+			},
+		});
 
-	let fullResponse = "";
-
-	const stream = new ReadableStream({
-		async start(controller) {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				fullResponse += decoder.decode(value);
-				controller.enqueue(value);
+	} catch (err) {
+		console.error("Chat error:", err);
+		return new Response(
+			JSON.stringify({ error: "Worker crashed", detail: String(err) }),
+			{
+				status: 500,
+				headers: { "content-type": "application/json" },
 			}
-
-			// Save AI response
-			if (fullResponse) {
-				await env.DB.prepare(
-					"INSERT INTO chat_history (role, content) VALUES (?, ?)"
-				)
-					.bind("assistant", fullResponse)
-					.run();
-			}
-
-			controller.close();
-		},
-	});
-
-	return new Response(stream, {
-		headers: {
-			"content-type": "text/event-stream",
-			"cache-control": "no-cache",
-		},
-	});
+		);
+	}
 }
