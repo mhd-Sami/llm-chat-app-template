@@ -2,8 +2,9 @@ import { Env, ChatMessage } from "./types";
 
 const MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
 
+// Updated to strictly enforce Markdown hyperlink formatting
 const SYSTEM_PROMPT =
-	"You are a helpful, friendly assistant. Provide concise and accurate responses.";
+	"You are a helpful, friendly assistant. Provide concise and accurate responses. When mentioning websites, resources, or URLs, you must ALWAYS format them as Markdown hyperlinks, like this: [Link Text](https://example.com).";
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
