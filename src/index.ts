@@ -46,18 +46,17 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
 			messages: ChatMessage[];
 		};
 
-		// Ensure system prompt
-		if (!messages.some((m) => m.role === "system")) {
+		if (!messages.some(m => m.role === "system")) {
 			messages.unshift({
 				role: "system",
 				content: SYSTEM_PROMPT,
 			});
 		}
 
-		// Save last USER message
+		// Save USER message immediately (safe)
 		const lastUser = [...messages]
 			.reverse()
-			.find((m) => m.role === "user")?.content;
+			.find(m => m.role === "user")?.content;
 
 		if (lastUser) {
 			await env.DB.prepare(
@@ -68,17 +67,18 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
 		}
 
 		// Call AI
-		const aiResponse = await env.AI.run(MODEL_ID, {
+		const aiStream = await env.AI.run(MODEL_ID, {
 			messages,
 			stream: true,
 			max_tokens: 1024,
 		});
 
-		// Convert stream to response so we can ALSO store assistant reply
-		const reader = aiResponse.getReader();
+		const reader = aiStream.getReader();
 		const decoder = new TextDecoder();
+		const encoder = new TextEncoder();
 
 		let fullResponse = "";
+
 		const stream = new ReadableStream({
 			async start(controller) {
 				while (true) {
@@ -86,24 +86,24 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
 					if (done) break;
 
 					const chunk = decoder.decode(value, { stream: true });
+
 					fullResponse += chunk;
-					controller.enqueue(new TextEncoder().encode(chunk));
+
+					controller.enqueue(encoder.encode(chunk));
 				}
 
 				controller.close();
+
+				// IMPORTANT: SAVE ASSISTANT AFTER STREAM ENDS
+				if (fullResponse.trim()) {
+					await env.DB.prepare(
+						"INSERT INTO chat_history (role, content) VALUES (?, ?)"
+					)
+						.bind("assistant", fullResponse)
+						.run();
+				}
 			},
 		});
-
-		// After response finishes → save assistant reply
-		setTimeout(async () => {
-			if (fullResponse.trim()) {
-				await env.DB.prepare(
-					"INSERT INTO chat_history (role, content) VALUES (?, ?)"
-				)
-					.bind("assistant", fullResponse)
-					.run();
-			}
-		}, 0);
 
 		return new Response(stream, {
 			headers: {
