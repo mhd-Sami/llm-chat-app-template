@@ -207,7 +207,8 @@ async function sendMessage() {
 					const content = jsonData.response || jsonData.choices?.[0]?.delta?.content || "";
 					if (content) {
 						responseText += content;
-						assistantTextEl.textContent = responseText; 
+						// Updated to use the HTML formatter for links
+						assistantTextEl.innerHTML = formatMessageContent(responseText); 
 						scrollToBottom();
 					}
 				} catch (e) {
@@ -251,7 +252,8 @@ function addMessageToChatUi(role, content) {
 	const messageEl = document.createElement("div");
 	messageEl.className = `message ${role}-message`;
 	messageEl.innerHTML = `<p></p>`;
-	messageEl.querySelector("p").textContent = content; 
+	// Updated to use the HTML formatter for links instead of raw textContent
+	messageEl.querySelector("p").innerHTML = formatMessageContent(content); 
 	chatMessages.insertBefore(messageEl, typingIndicator);
 	scrollToBottom();
 }
@@ -280,6 +282,26 @@ function consumeSseEvents(buffer) {
 
 function escapeHtml(str) {
 	return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+/**
+ * Safely parses text into HTML, converting Markdown links to clickable anchor tags.
+ */
+function formatMessageContent(text) {
+	// 1. Escape HTML first to prevent XSS attacks
+	let safeHtml = escapeHtml(text);
+
+	// 2. Convert Markdown links to clickable <a> tags
+	// Matches [Link Text](https://example.com)
+	safeHtml = safeHtml.replace(
+		/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, 
+		'<a href="$2" target="_blank" rel="noopener noreferrer" style="text-decoration: underline; color: #007bff;">$1</a>'
+	);
+
+	// 3. Preserve line breaks for readability
+	safeHtml = safeHtml.replace(/\n/g, "<br>");
+
+	return safeHtml;
 }
 
 // App Initialization Cycle Setup
